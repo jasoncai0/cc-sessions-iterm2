@@ -23,6 +23,8 @@ from cc_sessions import scanner, server, ui
 PROJECTS_DIR = os.path.expanduser("~/.claude/projects")
 TOOL_NAME = "Claude Sessions"
 TOOL_IDENTIFIER = "com.cc.sessions.toolbelt"
+PORT = 9223                # fixed: the toolbelt URL must be deterministic
+LIVENESS_INTERVAL = 5      # seconds between iTerm2-connection liveness checks
 
 _loop = None
 _connection = None
@@ -60,23 +62,48 @@ def _detail_fn(path):
     return scanner.session_detail(real)
 
 
-async def main(connection):
-    global _loop, _connection
-    _loop = asyncio.get_event_loop()
-    _connection = connection
-
-    httpd, port = server.serve(
-        _scan_fn, _resume_fn, ui.index_html(), detail_fn=_detail_fn)
-    threading.Thread(target=httpd.serve_forever, daemon=True).start()
-
+async def _register_tool(connection):
     await iterm2.tool.async_register_web_view_tool(
         connection,
         display_name=TOOL_NAME,
         identifier=TOOL_IDENTIFIER,
         reveal_if_already_registered=True,
-        url="http://127.0.0.1:%d/" % port)
+        url="http://127.0.0.1:%d/" % PORT)
 
-    await asyncio.Future()  # keep the script alive
+
+async def _iterm2_alive(connection):
+    try:
+        await iterm2.async_get_app(connection)
+        return True
+    except Exception:
+        return False
+
+
+async def main(connection):
+    global _loop, _connection
+    _loop = asyncio.get_event_loop()
+    _connection = connection
+
+    # Single instance on a fixed port. If 9223 is already bound, a healthy
+    # instance is already serving — just (re)point the toolbelt at it and exit
+    # this duplicate so we never pile up servers on drifting ports.
+    try:
+        httpd, _ = server.serve(
+            _scan_fn, _resume_fn, ui.index_html(),
+            start_port=PORT, attempts=1, detail_fn=_detail_fn)
+    except RuntimeError:
+        await _register_tool(connection)
+        return
+
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    await _register_tool(connection)
+
+    # Exit when iTerm2 goes away so we don't linger as an orphan holding 9223.
+    try:
+        while await _iterm2_alive(connection):
+            await asyncio.sleep(LIVENESS_INTERVAL)
+    finally:
+        httpd.shutdown()
 
 
 iterm2.run_forever(main)
