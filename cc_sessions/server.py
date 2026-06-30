@@ -2,6 +2,7 @@
 
 import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs, urlparse
 
 
 def envelope(success, code, msg, data=None):
@@ -13,16 +14,34 @@ def _json_bytes(payload):
     return json.dumps(payload).encode("utf-8")
 
 
-def route(method, path, body, *, scan_fn, resume_fn, ui_html):
+def route(method, path, body, *, scan_fn, resume_fn, ui_html, detail_fn=None):
     """Pure request router. Returns (status, content_type, body_bytes)."""
-    if method == "GET" and path == "/":
+    parsed_url = urlparse(path)
+    clean = parsed_url.path
+
+    if method == "GET" and clean == "/":
         return 200, "text/html; charset=utf-8", ui_html.encode("utf-8")
 
-    if method == "GET" and path == "/api/sessions":
+    if method == "GET" and clean == "/api/sessions":
         payload = envelope(True, 0, "ok", scan_fn())
         return 200, "application/json", _json_bytes(payload)
 
-    if method == "POST" and path == "/api/resume":
+    if method == "GET" and clean == "/api/session":
+        if detail_fn is None:
+            return 404, "application/json", _json_bytes(
+                envelope(False, 404, "not found"))
+        params = parse_qs(parsed_url.query)
+        target = (params.get("path") or [None])[0]
+        if not target:
+            return 400, "application/json", _json_bytes(
+                envelope(False, 400, "path is required"))
+        detail = detail_fn(target)
+        if detail is None:
+            return 404, "application/json", _json_bytes(
+                envelope(False, 404, "session not found"))
+        return 200, "application/json", _json_bytes(envelope(True, 0, "ok", detail))
+
+    if method == "POST" and clean == "/api/resume":
         try:
             parsed = json.loads(body.decode("utf-8")) if body else {}
         except (json.JSONDecodeError, UnicodeDecodeError):
@@ -44,7 +63,7 @@ def route(method, path, body, *, scan_fn, resume_fn, ui_html):
     return 404, "application/json", _json_bytes(envelope(False, 404, "not found"))
 
 
-def make_handler(scan_fn, resume_fn, ui_html):
+def make_handler(scan_fn, resume_fn, ui_html, detail_fn=None):
     """Build a request handler class bound to the given callables."""
 
     class Handler(BaseHTTPRequestHandler):
@@ -53,7 +72,8 @@ def make_handler(scan_fn, resume_fn, ui_html):
             body = self.rfile.read(length) if length else b""
             status, content_type, payload = route(
                 method, self.path, body,
-                scan_fn=scan_fn, resume_fn=resume_fn, ui_html=ui_html)
+                scan_fn=scan_fn, resume_fn=resume_fn, ui_html=ui_html,
+                detail_fn=detail_fn)
             self.send_response(status)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(payload)))
@@ -73,9 +93,9 @@ def make_handler(scan_fn, resume_fn, ui_html):
 
 
 def serve(scan_fn, resume_fn, ui_html, host="127.0.0.1",
-          start_port=9223, attempts=20):
+          start_port=9223, attempts=20, detail_fn=None):
     """Bind a ThreadingHTTPServer, trying successive ports. Returns (httpd, port)."""
-    handler = make_handler(scan_fn, resume_fn, ui_html)
+    handler = make_handler(scan_fn, resume_fn, ui_html, detail_fn=detail_fn)
     last_error = None
     for port in range(start_port, start_port + attempts):
         try:

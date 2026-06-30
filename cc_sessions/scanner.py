@@ -99,7 +99,59 @@ def parse_session_file(path):
         "timestamp": last_ts,
         "mtime": mtime,
         "label": truncate_label(label),
+        "path": path,
     }
+
+
+def _cap(text, limit):
+    """Truncate to limit chars (preserving newlines), appending an ellipsis."""
+    if len(text) <= limit:
+        return text
+    return text[: limit - 1] + "…"
+
+
+def session_detail(path):
+    """Rich detail for one session: meta + conversation preview, or None."""
+    base = parse_session_file(path)
+    if base is None:
+        return None
+    created = None
+    last_active = None
+    message_count = 0
+    first_message = None
+    last_message = None
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(record, dict):
+                    continue
+                if record.get("timestamp"):
+                    if created is None:
+                        created = record["timestamp"]
+                    last_active = record["timestamp"]
+                if record.get("type") in ("user", "assistant"):
+                    message_count += 1
+                    text = extract_user_text(record.get("message"))
+                    if is_meaningful_text(text):
+                        if record["type"] == "user" and first_message is None:
+                            first_message = text
+                        last_message = text
+    except OSError:
+        return None
+    detail = dict(base)
+    detail["created"] = created
+    detail["last_active"] = last_active
+    detail["message_count"] = message_count
+    detail["first_message"] = _cap(first_message, 1500) if first_message else base["label"]
+    detail["last_message"] = _cap(last_message, 280) if last_message else None
+    return detail
 
 
 def scan_sessions(projects_dir):

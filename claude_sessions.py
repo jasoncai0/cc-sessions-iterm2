@@ -12,7 +12,9 @@ import shlex
 import sys
 import threading
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# Resolve symlinks: the AutoLaunch entry is a symlink into the repo, and the
+# cc_sessions package lives next to the REAL file, not next to the symlink.
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 
 import iterm2  # provided by iTerm2's Python runtime
 
@@ -49,12 +51,22 @@ def _scan_fn():
     return scanner.build_payload(PROJECTS_DIR)
 
 
+def _detail_fn(path):
+    """Detail for one session, only if path is inside the projects dir."""
+    real = os.path.realpath(path)
+    root = os.path.realpath(PROJECTS_DIR)
+    if not real.startswith(root + os.sep) or not real.endswith(".jsonl"):
+        return None
+    return scanner.session_detail(real)
+
+
 async def main(connection):
     global _loop, _connection
     _loop = asyncio.get_event_loop()
     _connection = connection
 
-    httpd, port = server.serve(_scan_fn, _resume_fn, ui.index_html())
+    httpd, port = server.serve(
+        _scan_fn, _resume_fn, ui.index_html(), detail_fn=_detail_fn)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
 
     await iterm2.tool.async_register_web_view_tool(

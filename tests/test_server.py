@@ -29,6 +29,31 @@ class RouteTests(unittest.TestCase):
         self.assertEqual(payload["code"], 0)
         self.assertEqual(len(payload["data"]["groups"]), 1)
 
+    def test_session_detail_returns_data(self):
+        status, _, body = server.route(
+            "GET", "/api/session?path=%2Ftmp%2Fa.jsonl", b"", scan_fn=self._scan,
+            resume_fn=lambda i, c: None, ui_html="",
+            detail_fn=lambda p: {"id": "a", "path": p, "message_count": 3})
+        self.assertEqual(status, 200)
+        payload = json.loads(body)
+        self.assertTrue(payload["success"])
+        self.assertEqual(payload["data"]["path"], "/tmp/a.jsonl")
+        self.assertEqual(payload["data"]["message_count"], 3)
+
+    def test_session_detail_missing_path_is_400(self):
+        status, _, body = server.route(
+            "GET", "/api/session", b"", scan_fn=self._scan,
+            resume_fn=lambda i, c: None, ui_html="", detail_fn=lambda p: {})
+        self.assertEqual(status, 400)
+        self.assertFalse(json.loads(body)["success"])
+
+    def test_session_detail_not_found_is_404(self):
+        status, _, body = server.route(
+            "GET", "/api/session?path=%2Fnope.jsonl", b"", scan_fn=self._scan,
+            resume_fn=lambda i, c: None, ui_html="", detail_fn=lambda p: None)
+        self.assertEqual(status, 404)
+        self.assertFalse(json.loads(body)["success"])
+
     def test_resume_success(self):
         calls = []
         status, _, body = server.route(

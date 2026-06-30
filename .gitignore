@@ -2,3 +2,14 @@ __pycache__/
 *.pyc
 .DS_Store
 .venv/
+
+# iTerm2 scaffolding (created if a package dir is ever placed in AutoLaunch)
+iterm2env/
+setup.cfg
+cc_sessions/__init__/
+
+# oh-my-claudecode session scratch
+.omc/
+
+# subagent-driven-development scratch
+.superpowers/

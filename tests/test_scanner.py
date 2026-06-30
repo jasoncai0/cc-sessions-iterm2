@@ -105,6 +105,44 @@ class ParseSessionFileTests(unittest.TestCase):
         ])
         self.assertEqual(scanner.parse_session_file(path)["branch"], "main")
 
+    def test_includes_file_path(self):
+        path = self._write([
+            {"type": "user", "cwd": "/Users/demo/proj",
+             "message": {"content": "do it"}},
+        ])
+        self.assertEqual(scanner.parse_session_file(path)["path"], path)
+
+
+class SessionDetailTests(unittest.TestCase):
+    def _write(self, lines):
+        d = tempfile.mkdtemp(prefix="-Users-demo-detail")
+        path = os.path.join(d, "abc123.jsonl")
+        with open(path, "w", encoding="utf-8") as f:
+            for obj in lines:
+                f.write(json.dumps(obj) + "\n")
+        return path
+
+    def test_detail_collects_meta_and_preview(self):
+        path = self._write([
+            {"type": "user", "cwd": "/Users/demo/proj", "gitBranch": "main",
+             "timestamp": "2026-06-01T10:00:00Z",
+             "message": {"content": "first request"}},
+            {"type": "assistant", "timestamp": "2026-06-01T10:01:00Z",
+             "message": {"content": [{"type": "text", "text": "working on it"}]}},
+            {"type": "user", "timestamp": "2026-06-01T10:05:00Z",
+             "message": {"content": "and one more thing"}},
+        ])
+        detail = scanner.session_detail(path)
+        self.assertEqual(detail["message_count"], 3)
+        self.assertEqual(detail["first_message"], "first request")
+        self.assertEqual(detail["last_message"], "and one more thing")
+        self.assertEqual(detail["created"], "2026-06-01T10:00:00Z")
+        self.assertEqual(detail["last_active"], "2026-06-01T10:05:00Z")
+        self.assertEqual(detail["branch"], "main")
+
+    def test_detail_returns_none_for_missing_file(self):
+        self.assertIsNone(scanner.session_detail("/no/such/file.jsonl"))
+
 
 class ScanAndGroupTests(unittest.TestCase):
     def _make_projects(self):
