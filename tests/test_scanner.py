@@ -91,6 +91,20 @@ class ParseSessionFileTests(unittest.TestCase):
     def test_returns_none_for_missing_file(self):
         self.assertIsNone(scanner.parse_session_file("/no/such/file.jsonl"))
 
+    def test_literal_head_branch_is_hidden(self):
+        path = self._write([
+            {"type": "user", "cwd": "/Users/demo/proj", "gitBranch": "HEAD",
+             "message": {"content": "do it"}},
+        ])
+        self.assertIsNone(scanner.parse_session_file(path)["branch"])
+
+    def test_named_branch_is_kept(self):
+        path = self._write([
+            {"type": "user", "cwd": "/Users/demo/proj", "gitBranch": "main",
+             "message": {"content": "do it"}},
+        ])
+        self.assertEqual(scanner.parse_session_file(path)["branch"], "main")
+
 
 class ScanAndGroupTests(unittest.TestCase):
     def _make_projects(self):

@@ -85,6 +85,8 @@ def parse_session_file(path):
     session_id = os.path.splitext(os.path.basename(path))[0]
     if cwd is None:
         cwd = decode_cwd(os.path.basename(os.path.dirname(path)))
+    if branch == "HEAD":
+        branch = None  # detached checkout — not a meaningful branch label
     label = summary or first_user or session_id
     try:
         mtime = os.path.getmtime(path)
