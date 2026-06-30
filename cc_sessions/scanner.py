@@ -98,3 +98,44 @@ def parse_session_file(path):
         "mtime": mtime,
         "label": truncate_label(label),
     }
+
+
+def scan_sessions(projects_dir):
+    """Scan all *.jsonl session files under projects_dir into session dicts."""
+    sessions = []
+    if not os.path.isdir(projects_dir):
+        return sessions
+    for entry in os.listdir(projects_dir):
+        project_dir = os.path.join(projects_dir, entry)
+        if not os.path.isdir(project_dir):
+            continue
+        for fname in os.listdir(project_dir):
+            if not fname.endswith(".jsonl"):
+                continue
+            session = parse_session_file(os.path.join(project_dir, fname))
+            if session is not None:
+                sessions.append(session)
+    return sessions
+
+
+def group_sessions(sessions):
+    """Group sessions by cwd, newest session first, newest group first."""
+    by_cwd = {}
+    for session in sessions:
+        by_cwd.setdefault(session["cwd"], []).append(session)
+    groups = []
+    for cwd, items in by_cwd.items():
+        ordered = sorted(items, key=lambda s: s["mtime"], reverse=True)
+        groups.append({
+            "cwd": cwd,
+            "name": os.path.basename(cwd.rstrip("/")) or cwd,
+            "sessions": ordered,
+            "latest": ordered[0]["mtime"] if ordered else 0.0,
+        })
+    groups.sort(key=lambda g: g["latest"], reverse=True)
+    return groups
+
+
+def build_payload(projects_dir):
+    """Convenience: scan + group into the API payload shape."""
+    return {"groups": group_sessions(scan_sessions(projects_dir))}

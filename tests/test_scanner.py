@@ -92,5 +92,50 @@ class ParseSessionFileTests(unittest.TestCase):
         self.assertIsNone(scanner.parse_session_file("/no/such/file.jsonl"))
 
 
+class ScanAndGroupTests(unittest.TestCase):
+    def _make_projects(self):
+        root = tempfile.mkdtemp()
+        proj_a = os.path.join(root, "-Users-demo-a")
+        proj_b = os.path.join(root, "-Users-demo-b")
+        os.makedirs(proj_a)
+        os.makedirs(proj_b)
+        for name, cwd in [("s1.jsonl", "/Users/demo/a"),
+                          ("s2.jsonl", "/Users/demo/a")]:
+            with open(os.path.join(proj_a, name), "w", encoding="utf-8") as f:
+                f.write(json.dumps({"type": "user", "cwd": cwd,
+                                    "message": {"content": name}}) + "\n")
+        with open(os.path.join(proj_b, "s3.jsonl"), "w", encoding="utf-8") as f:
+            f.write(json.dumps({"type": "user", "cwd": "/Users/demo/b",
+                                "message": {"content": "b work"}}) + "\n")
+        # Set proj_a sessions to earlier mtime.
+        for name in ["s1.jsonl", "s2.jsonl"]:
+            os.utime(os.path.join(proj_a, name), (10 ** 9, 10 ** 9))
+        # Make proj_b's session the most recently modified.
+        os.utime(os.path.join(proj_b, "s3.jsonl"), (10 ** 9 + 100, 10 ** 9 + 100))
+        return root
+
+    def test_scan_finds_all_sessions(self):
+        root = self._make_projects()
+        sessions = scanner.scan_sessions(root)
+        self.assertEqual(len(sessions), 3)
+
+    def test_scan_returns_empty_for_missing_dir(self):
+        self.assertEqual(scanner.scan_sessions("/no/such/dir"), [])
+
+    def test_group_orders_groups_by_latest_session(self):
+        root = self._make_projects()
+        groups = scanner.group_sessions(scanner.scan_sessions(root))
+        self.assertEqual(groups[0]["cwd"], "/Users/demo/b")
+        names = {g["cwd"]: g for g in groups}
+        self.assertEqual(len(names["/Users/demo/a"]["sessions"]), 2)
+        self.assertEqual(names["/Users/demo/a"]["name"], "a")
+
+    def test_build_payload_shape(self):
+        root = self._make_projects()
+        payload = scanner.build_payload(root)
+        self.assertIn("groups", payload)
+        self.assertEqual(len(payload["groups"]), 2)
+
+
 if __name__ == "__main__":
     unittest.main()
