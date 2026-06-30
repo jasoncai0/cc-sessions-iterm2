@@ -1,5 +1,8 @@
 import json
+import threading
 import unittest
+import urllib.error
+import urllib.request
 
 from cc_sessions import server
 
@@ -56,6 +59,35 @@ class RouteTests(unittest.TestCase):
             "GET", "/nope", b"", scan_fn=self._scan,
             resume_fn=lambda i, c: None, ui_html="")
         self.assertEqual(status, 404)
+
+
+class ServeTests(unittest.TestCase):
+    def test_serve_binds_and_answers_sessions(self):
+        scan = lambda: {"groups": []}
+        httpd, port = server.serve(scan, lambda i, c: None, "<html>x</html>",
+                                   start_port=9300)
+        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with urllib.request.urlopen(
+                    "http://127.0.0.1:%d/api/sessions" % port, timeout=5) as resp:
+                payload = json.loads(resp.read())
+            self.assertTrue(payload["success"])
+        finally:
+            httpd.shutdown()
+
+    def test_serve_retries_when_port_busy(self):
+        first, port = server.serve(lambda: {"groups": []}, lambda i, c: None,
+                                   "", start_port=9320)
+        try:
+            second, port2 = server.serve(lambda: {"groups": []}, lambda i, c: None,
+                                         "", start_port=9320)
+            try:
+                self.assertNotEqual(port, port2)
+            finally:
+                second.server_close()
+        finally:
+            first.server_close()
 
 
 if __name__ == "__main__":

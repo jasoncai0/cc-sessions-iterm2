@@ -1,6 +1,7 @@
 """Local HTTP bridge between the Toolbelt webview and iTerm2."""
 
 import json
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 
 def envelope(success, code, msg, data=None):
@@ -41,3 +42,46 @@ def route(method, path, body, *, scan_fn, resume_fn, ui_html):
         return 200, "application/json", _json_bytes(envelope(True, 0, "ok"))
 
     return 404, "application/json", _json_bytes(envelope(False, 404, "not found"))
+
+
+def make_handler(scan_fn, resume_fn, ui_html):
+    """Build a request handler class bound to the given callables."""
+
+    class Handler(BaseHTTPRequestHandler):
+        def _dispatch(self, method):
+            length = int(self.headers.get("Content-Length", 0) or 0)
+            body = self.rfile.read(length) if length else b""
+            status, content_type, payload = route(
+                method, self.path, body,
+                scan_fn=scan_fn, resume_fn=resume_fn, ui_html=ui_html)
+            self.send_response(status)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+        def do_GET(self):
+            self._dispatch("GET")
+
+        def do_POST(self):
+            self._dispatch("POST")
+
+        def log_message(self, *args):
+            pass  # keep iTerm2's script console quiet
+
+    return Handler
+
+
+def serve(scan_fn, resume_fn, ui_html, host="127.0.0.1",
+          start_port=9223, attempts=20):
+    """Bind a ThreadingHTTPServer, trying successive ports. Returns (httpd, port)."""
+    handler = make_handler(scan_fn, resume_fn, ui_html)
+    last_error = None
+    for port in range(start_port, start_port + attempts):
+        try:
+            httpd = ThreadingHTTPServer((host, port), handler)
+            return httpd, port
+        except OSError as error:
+            last_error = error
+            continue
+    raise RuntimeError("no free port found") from last_error
