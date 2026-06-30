@@ -1,3 +1,6 @@
+import json
+import os
+import tempfile
 import unittest
 
 from cc_sessions import scanner
@@ -41,6 +44,52 @@ class TruncateLabelTests(unittest.TestCase):
 
     def test_truncates_with_ellipsis(self):
         self.assertEqual(scanner.truncate_label("x" * 100, limit=10), "x" * 9 + "…")
+
+
+class ParseSessionFileTests(unittest.TestCase):
+    def _write(self, lines):
+        d = tempfile.mkdtemp(prefix="-Users-demo-proj")
+        path = os.path.join(d, "abc123.jsonl")
+        with open(path, "w", encoding="utf-8") as f:
+            for obj in lines:
+                f.write(json.dumps(obj) + "\n")
+        return path
+
+    def test_uses_summary_when_present(self):
+        path = self._write([
+            {"type": "user", "cwd": "/Users/demo/proj", "gitBranch": "main",
+             "timestamp": "2026-06-01T10:00:00Z",
+             "message": {"content": "do the thing"}},
+            {"type": "summary", "summary": "Refactor the parser"},
+        ])
+        result = scanner.parse_session_file(path)
+        self.assertEqual(result["id"], "abc123")
+        self.assertEqual(result["cwd"], "/Users/demo/proj")
+        self.assertEqual(result["branch"], "main")
+        self.assertEqual(result["label"], "Refactor the parser")
+
+    def test_falls_back_to_first_meaningful_user_message(self):
+        path = self._write([
+            {"type": "user", "cwd": "/Users/demo/proj",
+             "message": {"content": "<local-command-caveat>skip me"}},
+            {"type": "user", "message": {"content": "real request here"}},
+        ])
+        result = scanner.parse_session_file(path)
+        self.assertEqual(result["label"], "real request here")
+
+    def test_skips_malformed_lines_and_decodes_cwd_fallback(self):
+        d = tempfile.mkdtemp(prefix="-Users-demo-fallback")
+        path = os.path.join(d, "s1.jsonl")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("not json\n")
+            f.write(json.dumps({"type": "user", "message": {"content": "hi"}}) + "\n")
+        result = scanner.parse_session_file(path)
+        # cwd not in records -> decoded from the temp folder name (starts with '/')
+        self.assertTrue(result["cwd"].startswith("/"))
+        self.assertEqual(result["label"], "hi")
+
+    def test_returns_none_for_missing_file(self):
+        self.assertIsNone(scanner.parse_session_file("/no/such/file.jsonl"))
 
 
 if __name__ == "__main__":
